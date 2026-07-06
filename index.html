@@ -1329,6 +1329,7 @@ function loadState(){
 function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
 let state=loadState();
+let pendingDishId=null;
 let currentDate=todayStr();
 let currentView='home';
 let activeScanner=null;
@@ -1866,7 +1867,8 @@ function renderFoodModalBody(mealKey, mode){
       '<div class="foodlist" id="foodList"></div>'+
       '<div id="amountArea"></div>'+
       '<div class="preview-box" id="previewBox">食品を選択してください</div>'+
-      '<button class="btn full" id="confirmAdd" disabled>追加する</button>';
+      '<button class="btn full" id="confirmAdd" disabled>追加する</button>'+
+      '<div id="foodDishSuggest"></div>';
     let selected=null;
     let activeCat='すべて';
     function renderList(filter){
@@ -1883,6 +1885,21 @@ function renderFoodModalBody(mealKey, mode){
         selected=state.foods.find(f=>f.id===el.dataset.id);
         renderAmountArea(selected);
       }));
+      /* 検索した食材を使ったメニューを提案 */
+      const sug=document.getElementById('foodDishSuggest');
+      const dishes = (filter && filter.length>=2) ? dishesWithIngredient(filter) : [];
+      if(dishes.length){
+        sug.innerHTML='<div class="side-label" style="margin:16px 0 8px;">「'+escapeHtml(filter)+'」を使ったメニュー(タップで調理)</div>'+
+          '<div class="foodlist">'+dishes.map(d=>
+            '<div class="foodlist-item" data-dish="'+d.id+'"><span>'+escapeHtml(d.name)+' <span style="font-size:10px;color:var(--ink-soft);">'+escapeHtml(d.cuisine||'')+'</span></span>'+
+            '<span class="kcal">'+Math.round(d.cal)+'kcal</span></div>'
+          ).join('')+'</div>';
+        sug.querySelectorAll('[data-dish]').forEach(el=>el.addEventListener('click', function(){
+          pendingDishId=el.dataset.dish;
+          document.querySelectorAll('#modeChips .chip').forEach(x=>x.classList.toggle('active', x.dataset.mode==='menu'));
+          renderFoodModalBody(mealKey,'menu');
+        }));
+      }else{ sug.innerHTML=''; }
     }
     function renderAmountArea(food){
       const area=document.getElementById('amountArea');
@@ -2262,6 +2279,30 @@ function renderMenuMode(mealKey, body){
     document.getElementById('menuCuiRow').querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
     c.classList.add('active'); activeCui=c.dataset.cui; renderList(document.getElementById('menuSearch').value);
   }));
+  /* 食材検索から渡されたメニューを自動選択 */
+  if(pendingDishId){
+    const d=state.foods.find(f=>f.id===pendingDishId && f.dish);
+    pendingDishId=null;
+    if(d){
+      activeCui = d.cuisine || 'オリジナル';
+      document.getElementById('menuCuiRow').querySelectorAll('.chip').forEach(x=>x.classList.toggle('active', x.dataset.cui===activeCui));
+      renderList('');
+      const el=document.querySelector('#menuList .foodlist-item[data-id="'+d.id+'"]');
+      if(el){ el.classList.add('selected'); el.scrollIntoView({block:'nearest'}); }
+      selected=d;
+      renderAmount(d);
+    }
+  }
+}
+/* 指定した食材を使っているメニューを探す */
+function dishesWithIngredient(name){
+  if(!name || name.length<2) return [];
+  const res=state.foods.filter(f=>f.dish && (
+    (f.ing && f.ing.some(p=>p[0].includes(name)||name.includes(p[0]))) ||
+    f.name.includes(name)
+  ));
+  res.sort((a,b)=>((a.name.includes(name)?0:1)-(b.name.includes(name)?0:1)) || (a.cal-b.cal));
+  return res.slice(0,20);
 }
 /* 材料から作れそうなメニューを探す(キー材料の重なりで判定) */
 function matchDishesByIngredients(names){
