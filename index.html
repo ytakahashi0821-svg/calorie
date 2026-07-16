@@ -187,7 +187,29 @@ main#views{flex:1;overflow-y:auto;padding:18px 16px 96px;}
 .coverage-note{font-size:11px;color:var(--ink-soft);margin-top:10px;line-height:1.5;}
 
 .balance-card{background:var(--paper);border-radius:var(--r-card);box-shadow:var(--shadow);padding:16px 18px;margin-bottom:18px;}
-.balance-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.rv-card{background:var(--paper);border-radius:var(--r-card);box-shadow:var(--shadow);padding:16px 18px;margin-bottom:16px;}
+.rv-title{font-family:var(--display);font-weight:500;font-size:15px;color:var(--ink);margin-bottom:12px;}
+.rv-chart{display:flex;align-items:flex-end;gap:4px;height:130px;position:relative;padding-top:6px;border-bottom:1.5px solid var(--line);}
+.rv-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;gap:3px;}
+.rv-bar{width:70%;max-width:26px;border-radius:5px 5px 0 0;min-height:2px;transition:height .3s ease;}
+.rv-daylbl{font-size:9px;color:var(--ink-soft);margin-top:5px;text-align:center;line-height:1.2;}
+.rv-target-line{position:absolute;left:0;right:0;border-top:1.5px dashed var(--energy);}
+.rv-target-tag{position:absolute;right:0;font-size:9px;color:var(--rose-deep);background:var(--paper);padding:0 3px;transform:translateY(-50%);}
+.rv-legend{font-size:10.5px;color:var(--ink-soft);margin-top:8px;line-height:1.5;}
+.rv-adq{margin-bottom:11px;}
+.rv-adq-head{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;}
+.rv-adq-head .nm{color:var(--ink);font-weight:600;}
+.rv-adq-head .val{color:var(--ink-soft);font-size:11px;}
+.rv-adq-track{height:9px;border-radius:5px;background:var(--line);overflow:hidden;}
+.rv-adq-fill{height:100%;border-radius:5px;transition:width .3s ease;}
+.rv-heat{width:100%;border-collapse:separate;border-spacing:3px;}
+.rv-heat td{padding:0;}
+.rv-heat .rl{font-size:10.5px;color:var(--ink);white-space:nowrap;padding-right:6px;text-align:right;width:1%;}
+.rv-cell{width:100%;height:16px;border-radius:4px;}
+.rv-heat .cl{font-size:8px;color:var(--ink-soft);text-align:center;}
+.rv-tip{font-size:12.5px;line-height:1.7;color:var(--ink);}
+.rv-tip .low{color:#b07a3a;font-weight:700;}
+.rv-tip .good{color:#5c7d63;font-weight:700;}.balance-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
 .balance-head .title{font-family:var(--display);font-weight:500;font-size:15px;color:var(--ink);}
 .balance-grade{font-size:11.5px;font-weight:700;padding:4px 12px;border-radius:999px;white-space:nowrap;}
 .balance-grade.great{background:rgba(138,168,144,.2);color:#5c7d63;}
@@ -290,12 +312,17 @@ main#views{flex:1;overflow-y:auto;padding:18px 16px 96px;}
     <section id="view-goal" class="view">
       <div id="goalForm"></div>
     </section>
+
+    <section id="view-review" class="view">
+      <div id="reviewContainer"></div>
+    </section>
   </main>
 
   <nav class="tabbar">
     <button class="tab-btn active" data-view="home">ホーム</button>
     <button class="tab-btn" data-view="meals">食事</button>
     <button class="tab-btn" data-view="run">ランニング</button>
+    <button class="tab-btn" data-view="review">ふりかえり</button>
     <button class="tab-btn" data-view="goal">目標</button>
   </nav>
 
@@ -1332,6 +1359,7 @@ let state=loadState();
 let pendingDishId=null;
 let currentDate=todayStr();
 let currentView='home';
+let reviewDays=7;
 let activeScanner=null;
 
 function todayStr(d){
@@ -1484,6 +1512,7 @@ function switchView(view){
   if(view==='home') renderHome();
   if(view==='meals') renderMeals();
   if(view==='run') renderRuns();
+  if(view==='review') renderReview();
   if(view==='goal') renderGoalForm();
 }
 function shiftDate(delta){
@@ -2666,6 +2695,128 @@ function renderBarcodeMode(mealKey, body){
 }
 
 /* ---------- ランニング ---------- */
+/* ---------- ふりかえり(週間・累積の栄養バランス) ---------- */
+function reviewDates(n){
+  const out=[]; const base=new Date(todayStr()+'T00:00:00');
+  for(let i=n-1;i>=0;i--){ const d=new Date(base); d.setDate(d.getDate()-i); out.push(todayStr(d)); }
+  return out;
+}
+function adqColor(r){
+  if(r>=0.8) return 'var(--protein)';
+  if(r>=0.5) return 'var(--carbs)';
+  return 'var(--danger)';
+}
+function renderReview(){
+  const c=document.getElementById('reviewContainer');
+  const p=state.profile;
+  if(!p){
+    c.innerHTML='<div class="rv-card"><div class="rv-title">ふりかえり</div><p class="hint">先に「目標」タブでプロフィールを設定すると、1週間〜1か月の栄養バランスの偏りが見えるようになります。</p></div>';
+    return;
+  }
+  const tdee=calcTDEE(calcBMR(p),p.activity);
+  const targetCal=calcGoalCalories(tdee,p.goalType,p.goalRate);
+  const macros=calcMacros(targetCal,p.weight,p.proteinPerKg,p.fatPercent);
+  const mt=microTargets(p);
+  const dates=reviewDates(reviewDays);
+  const days=dates.map(d=>{ const t=dayTotals(d); return {date:d, t, logged:t.cal>0}; });
+  const withData=days.filter(d=>d.logged);
+
+  /* 期間切替 */
+  let html='<div class="rv-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'+
+    '<div class="rv-title" style="margin:0;">栄養のふりかえり</div>'+
+    '<div class="chip-row" style="flex:none;">'+[7,14,30].map(n=>'<button class="chip'+(n===reviewDays?' active':'')+'" data-rvdays="'+n+'" style="flex:none;padding:6px 11px;">'+n+'日</button>').join('')+'</div>'+
+    '</div><div class="hint">記録があった日: '+withData.length+' / '+reviewDays+'日</div></div>';
+
+  if(!withData.length){
+    c.innerHTML=html+'<div class="rv-card"><p class="hint">この期間の食事記録がまだありません。食事を記録すると、ここに推移とバランスが表示されます。</p></div>';
+    bindReviewChips();
+    return;
+  }
+
+  /* 1. 日別カロリー推移 */
+  const maxCal=Math.max(targetCal, ...days.map(d=>d.t.cal))*1.12;
+  const targetPct=(targetCal/maxCal)*100;
+  html+='<div class="rv-card"><div class="rv-title">1日のカロリー推移</div>'+
+    '<div class="rv-chart">'+
+    '<div class="rv-target-line" style="bottom:'+targetPct+'%;"></div><span class="rv-target-tag" style="bottom:'+targetPct+'%;">目標'+Math.round(targetCal)+'</span>'+
+    days.map(d=>{
+      const h=d.logged?Math.max((d.t.cal/maxCal)*100,2):0;
+      const over=d.t.cal>targetCal*1.1, under=d.logged&&d.t.cal<targetCal*0.6;
+      const col=!d.logged?'var(--line)':(over?'var(--danger)':(under?'var(--carbs)':'var(--energy)'));
+      const dd=new Date(d.date+'T00:00:00');
+      return '<div class="rv-col"><div class="rv-bar" style="height:'+h+'%;background:'+col+';"></div>'+
+        '<div class="rv-daylbl">'+(dd.getMonth()+1)+'/'+dd.getDate()+'</div></div>';
+    }).join('')+
+    '</div><div class="rv-legend">点線が目標カロリー。灰色は記録なしの日です。</div></div>';
+
+  /* 2. 平均 vs 目標(記録日平均) */
+  function avg(fn){ return withData.reduce((s,d)=>s+fn(d.t),0)/withData.length; }
+  const avgCov=avg(t=>t.coverage);
+  const rows=[
+    {key:'cal',nm:'カロリー',avg:avg(t=>t.cal),tgt:targetCal,unit:'kcal',dec:0,goal:true},
+    {key:'protein',nm:'たんぱく質',avg:avg(t=>t.protein),tgt:macros.proteinG,unit:'g',dec:0,coach:true},
+    {key:'fat',nm:'脂質',avg:avg(t=>t.fat),tgt:macros.fatG,unit:'g',dec:0},
+    {key:'carb',nm:'炭水化物',avg:avg(t=>t.carb),tgt:macros.carbG,unit:'g',dec:0},
+    {key:'iron',nm:'鉄分',avg:avg(t=>t.micro.iron),tgt:mt.iron,unit:'mg',dec:1,coach:true,micro:true},
+    {key:'calcium',nm:'カルシウム',avg:avg(t=>t.micro.calcium),tgt:mt.calcium,unit:'mg',dec:0,coach:true,micro:true},
+    {key:'vitC',nm:'ビタミンC',avg:avg(t=>t.micro.vitC),tgt:mt.vitC,unit:'mg',dec:0,coach:true,micro:true},
+    {key:'potassium',nm:'カリウム',avg:avg(t=>t.micro.potassium),tgt:mt.potassium,unit:'mg',dec:0,coach:true,micro:true},
+    {key:'vitB1',nm:'ビタミンB1',avg:avg(t=>t.micro.vitB1),tgt:mt.vitB1,unit:'mg',dec:2,coach:true,micro:true}
+  ];
+  html+='<div class="rv-card"><div class="rv-title">1日あたりの平均(記録日）</div>'+
+    rows.map(r=>{
+      const ratio=r.tgt>0?r.avg/r.tgt:0;
+      const pct=Math.min(ratio*100,100);
+      const col = r.goal ? 'var(--run)' : adqColor(ratio);
+      return '<div class="rv-adq"><div class="rv-adq-head"><span class="nm">'+r.nm+'</span>'+
+        '<span class="val">'+r.avg.toFixed(r.dec)+' / '+Math.round(r.tgt)+r.unit+' ('+Math.round(ratio*100)+'%)</span></div>'+
+        '<div class="rv-adq-track"><div class="rv-adq-fill" style="width:'+pct+'%;background:'+col+';"></div></div></div>';
+    }).join('')+
+    (avgCov<0.6?'<div class="rv-legend">※微量栄養素は成分データのある食品からの推定です。手入力の食品が多い日は低めに出ることがあります。</div>':'')+
+    '</div>';
+
+  /* 3. 栄養素ヒートマップ(累積で偏りを可視化) */
+  const heatKeys=[['protein','たんぱく質',macros.proteinG,false],['iron','鉄分',mt.iron,true],['calcium','カルシウム',mt.calcium,true],['vitC','ビタミンC',mt.vitC,true],['potassium','カリウム',mt.potassium,true],['vitB1','ビタミンB1',mt.vitB1,true]];
+  html+='<div class="rv-card"><div class="rv-title">栄養素の充足マップ</div><table class="rv-heat"><tbody>';
+  heatKeys.forEach(([k,nm,tgt])=>{
+    html+='<tr><td class="rl">'+nm+'</td>'+days.map(d=>{
+      let col='var(--line)';
+      if(d.logged && tgt>0){
+        const v = k==='protein'?d.t.protein:d.t.micro[k];
+        col=adqColor(v/tgt);
+      }
+      return '<td><div class="rv-cell" style="background:'+col+';"></div></td>';
+    }).join('')+'</tr>';
+  });
+  html+='<tr><td class="rl"></td>'+days.map(d=>{const dd=new Date(d.date+'T00:00:00');return '<td class="cl">'+(dd.getMonth()+1)+'/'+dd.getDate()+'</td>';}).join('')+'</tr>';
+  html+='</tbody></table><div class="rv-legend"><span style="color:var(--protein);">■</span>十分　<span style="color:var(--carbs);">■</span>あと一歩　<span style="color:var(--danger);">■</span>不足　<span style="color:var(--ink-soft);">■</span>記録なし</div></div>';
+
+  /* 4. 偏りの傾向 + 補う副菜 */
+  const coachRows=rows.filter(r=>r.coach && !(r.micro && avgCov<0.6));
+  const low=coachRows.filter(r=>r.avg/r.tgt<0.7).sort((a,b)=>(a.avg/a.tgt)-(b.avg/b.tgt));
+  const good=coachRows.filter(r=>r.avg/r.tgt>=0.9);
+  let tip='<div class="rv-card"><div class="rv-title">この期間の傾向</div><div class="rv-tip">';
+  if(low.length){
+    tip+='<span class="low">'+low.slice(0,3).map(r=>r.nm).join('・')+'</span> が不足しがちです。';
+    const top=low[0];
+    const picks=suggestSideDishes(top.key, top.key==='protein');
+    if(picks.length){ tip+='<br>'+top.nm+'を補うなら、'+picks.map(f=>escapeHtml(f.name)).join('・')+' などがおすすめです。'; }
+  }else{
+    tip+='大きな偏りはありません。バランス良く食べられています。';
+  }
+  if(good.length){ tip+='<br><span class="good">'+good.slice(0,4).map(r=>r.nm).join('・')+'</span> はしっかり摂れています。'; }
+  tip+='</div></div>';
+  html+=tip;
+
+  c.innerHTML=html;
+  bindReviewChips();
+}
+function bindReviewChips(){
+  document.querySelectorAll('#reviewContainer [data-rvdays]').forEach(b=>b.addEventListener('click', function(){
+    reviewDays=+b.dataset.rvdays; renderReview();
+  }));
+}
+
 function renderRuns(){
   const log=getDayLog(currentDate);
   const totalBurn=log.runs.reduce((s,r)=>s+r.kcal,0);
